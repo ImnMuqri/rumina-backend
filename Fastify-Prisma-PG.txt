@@ -1,0 +1,139 @@
+🧱 Overview
+
+We’ll build a backend using:
+
+Fastify for the server
+
+Prisma as ORM
+
+PostgreSQL as the database
+
+Railway for deployment
+
+⚙️ 1. Initialize the project
+
+Create a new folder for your backend:
+
+mkdir finance-backend
+cd finance-backend
+npm init -y
+
+📦 2. Install dependencies
+
+Install Fastify, Prisma, and PostgreSQL driver:
+
+npm install fastify fastify-cors fastify-env
+npm install @prisma/client
+npm install -D prisma
+npm install dotenv
+npm install fastify-plugin
+
+🗃️ 3. Setup Prisma
+
+Initialize Prisma:
+
+npx prisma init
+
+
+This creates:
+
+prisma/schema.prisma
+
+.env file
+
+In .env, set your Railway database URL:
+
+You’ll fill this later after creating a Railway PostgreSQL instance, but for local testing:
+
+DATABASE_URL="postgresql://user:password@localhost:5432/finance_db"
+
+🧩 4. Define your database schema
+
+Open prisma/schema.prisma and write:
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Transaction {
+  id          Int      @id @default(autoincrement())
+  type        String   // income or expense
+  category    String
+  amount      Float
+  description String?
+  createdAt   DateTime @default(now())
+}
+
+
+This is a good start for your finance dashboard.
+
+🧰 5. Run migration
+npx prisma migrate dev --name init
+
+🚀 6. Setup Fastify server
+
+Create src/server.js (or index.js):
+
+import Fastify from 'fastify';
+import dotenv from 'dotenv';
+import { PrismaClient } from '@prisma/client';
+
+dotenv.config();
+
+const fastify = Fastify({ logger: true });
+const prisma = new PrismaClient();
+
+// Example route
+fastify.get('/', async () => {
+  return { message: 'Finance API is running' };
+});
+
+// Get all transactions
+fastify.get('/transactions', async () => {
+  return await prisma.transaction.findMany();
+});
+
+// Add new transaction
+fastify.post('/transactions', async (req, reply) => {
+  const { type, category, amount, description } = req.body;
+  const transaction = await prisma.transaction.create({
+    data: { type, category, amount, description },
+  });
+  reply.code(201).send(transaction);
+});
+
+const start = async () => {
+  try {
+    await fastify.listen({ port: process.env.PORT || 3000, host: '0.0.0.0' });
+  } catch (err) {
+    fastify.log.error(err);
+    process.exit(1);
+  }
+};
+start();
+
+🧪 7. Test locally
+node src/server.js
+
+
+Visit http://localhost:3000 and test /transactions routes.
+
+☁️ 8. Deploy to Railway
+
+Go to https://railway.app
+
+Create a new project
+
+Add a PostgreSQL plugin
+
+Copy the database URL into your .env
+
+Deploy your project (connect your GitHub repo or use Railway CLI)
+
+Railway will automatically detect Node.js and run it.
+You can add your environment variables from the Railway dashboard.
