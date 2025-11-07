@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client"
   output   = "../generated/prisma"
@@ -14,11 +8,144 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Enums
+enum UserTier {
+  FREE
+  PRO
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELED
+  PAST_DUE
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+}
+
+enum GoalStatus {
+  ON_TRACK
+  BEHIND
+  COMPLETED
+}
+
+enum FinancialDiaryMood {
+  PROUD
+  REFLECTIVE
+  ACCOMPLISHED
+  GRATEFUL
+}
+
+// User model
+model User {
+  id             Int              @id @default(autoincrement())
+  email          String           @unique
+  name           String?
+  stripeId       String?          // Stripe customer ID
+  passwordHash   String
+  tier           UserTier         @default(FREE)
+  createdAt      DateTime         @default(now())
+
+  // Relationships
+  transactions   Transaction[]
+  goals          Goal[]
+  financialDiary FinancialDiary[]
+  aiInsights     AiInsight[]
+
+  @@index([stripeId])
+}
+
+// Subscription model
+model Subscription {
+  id              Int                @id @default(autoincrement())
+  userId          Int
+  stripeSubId     String
+  status          SubscriptionStatus
+  priceId         String             // Stripe price ID
+  currentPeriodEnd DateTime
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  user            User               @relation(fields: [userId], references: [id])
+
+  @@unique([userId, stripeSubId])
+  @@index([userId])
+}
+
+// Payment model
+model Payment {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  stripePaymentId String
+  amount          Int
+  currency        String   @default("MYR")
+  status          String
+  paymentMethod   String?  // optional: card, wallet, etc.
+  createdAt       DateTime @default(now())
+
+  user            User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+// Transaction model
 model Transaction {
-  id          Int      @id @default(autoincrement())
-  type        String   // income or expense
+  id          Int            @id @default(autoincrement())
+  user        User           @relation(fields: [userId], references: [id])
+  userId      Int            @index
+  type        TransactionType
   category    String
   amount      Float
   description String?
-  createdAt   DateTime @default(now())
+  date        DateTime       @default(now())
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+}
+
+// Goal model
+model Goal {
+  id             Int       @id @default(autoincrement())
+  user           User      @relation(fields: [userId], references: [id])
+  userId         Int       @index
+  title          String
+  category       String
+  targetAmount   Float
+  savedAmount    Float     @default(0)
+  targetDate     DateTime
+  status         GoalStatus
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+// FinancialDiary model
+model FinancialDiary {
+  id           Int                 @id @default(autoincrement())
+  user         User                @relation(fields: [userId], references: [id])
+  userId       Int                 @index
+  date         DateTime            @default(now())
+  mood         FinancialDiaryMood
+  content      Text
+  summary      String?             // optional for dashboard
+  aiInsight    String?             // Rumia’s reflection
+  tags         String?             // comma-separated tags
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+}
+
+// AiInsight model
+model AiInsight {
+  id                   Int       @id @default(autoincrement())
+  user                 User      @relation(fields: [userId], references: [id])
+  userId               Int       @index
+  date                 DateTime  @default(now())
+  wellnessScore        Int       // 0–100
+  savingsRate          Int
+  debtManagement       Int
+  emergencyFund        Int
+  expenseControl       Int
+  summary              String?   // optional AI summary
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 }

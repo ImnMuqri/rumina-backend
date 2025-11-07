@@ -1,3 +1,5 @@
+https://console.groq.com/ Ai Model
+
 🧱 Overview
 
 We’ll build a backend using:
