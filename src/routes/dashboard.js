@@ -1,30 +1,27 @@
 import { generateSummaryInsight } from "../services/aiInsights.js";
 
-export default async function dashboardRoutes(app, options) {
+export default async function dashboardRoutes(app) {
   app.get(
     "/dashboard",
     { preHandler: [app.authenticate] },
     async (req, reply) => {
       try {
-        // 1. Fetch user data from Prisma
         const userId = req.user.id;
 
-        // Example: assuming you have these tables: UserFinance, Expense, Savings
-        const finance = await app.prisma.userFinance.findUnique({
-          where: { userId },
-        });
+        // Fetch user finance and expenses
+        const [finance, expenses, totalSaved] = await Promise.all([
+          app.prisma.userFinance.findUnique({ where: { userId } }),
+          app.prisma.expense.findMany({
+            where: { userId },
+            select: { category: true, amount: true },
+          }),
+          app.prisma.saving.aggregate({
+            where: { userId },
+            _sum: { amount: true },
+          }),
+        ]);
 
-        const expenses = await app.prisma.expense.findMany({
-          where: { userId },
-          select: { category: true, amount: true },
-        });
-
-        const totalSaved = await app.prisma.saving.aggregate({
-          where: { userId },
-          _sum: { amount: true },
-        });
-
-        // 2. Prepare data for AI summary
+        // Compute totals
         const monthlyExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
         const topCategories = expenses
           .reduce((acc, item) => {
@@ -47,10 +44,9 @@ export default async function dashboardRoutes(app, options) {
           topCategories,
         };
 
-        // 3. Generate AI summary insight
+        // Generate AI summary insight
         const aiInsight = await generateSummaryInsight(userData);
 
-        // 4. Combine data + AI output for the dashboard
         const dashboardData = {
           financialOverview: {
             monthlyIncome: {
@@ -74,7 +70,6 @@ export default async function dashboardRoutes(app, options) {
               note: "Lifetime total",
             },
           },
-
           charts: {
             incomeVsExpense: {
               income: userData.monthlyIncome,
@@ -82,19 +77,16 @@ export default async function dashboardRoutes(app, options) {
             },
             topExpenseCategories: userData.topCategories,
           },
-
-          insights: aiInsight.summaryInsights,
+          insights: aiInsight?.summaryInsights || [],
         };
 
-        return reply.code(200).send({
-          success: true,
-          data: dashboardData,
-        });
+        return reply.code(200).send({ success: true, data: dashboardData });
       } catch (error) {
-        req.log.error(error);
+        app.log.error(error);
         return reply.code(500).send({
           success: false,
           message: "Failed to load dashboard data",
+          error: error.message,
         });
       }
     }

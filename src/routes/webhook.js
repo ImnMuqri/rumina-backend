@@ -1,82 +1,100 @@
-const priceIdToTier = require("../config/stripePrices");
-const { stripe } = require("../services/stripeService");
-const prisma = require("../utils/prisma");
+import prisma from "../utils/prisma.js";
+import crypto from "crypto";
 
-module.exports = async function (fastify) {
-  // Preserve raw body for Stripe signature
+export default async function webhookRoutes(fastify) {
+  // Parse raw JSON body for signature verification
   fastify.addContentTypeParser(
     "application/json",
     { parseAs: "buffer", bodyLimit: 1024 * 1024 },
-    function (req, body, done) {
-      done(null, body);
-    }
+    (req, body, done) => done(null, body)
   );
 
   fastify.post("/webhook", async (request, reply) => {
-    const sig = request.headers["stripe-signature"];
-    let event;
+    const { order_id, status, amount, email, plan } = request.body;
 
     try {
-      event = stripe.webhooks.constructEvent(
-        request.body,
-        sig,
-        process.env.STRIPE_WEBHOOK_SECRET
-      );
-    } catch (err) {
-      console.error("Stripe webhook error:", err.message);
-      return reply.status(400).send(`Webhook Error: ${err.message}`);
-    }
-
-    try {
-      switch (event.type) {
-        case "customer.subscription.created":
-        case "customer.subscription.updated":
-        case "invoice.paid": {
-          const subscription = event.data.object;
-          const priceId = subscription.items.data[0].price.id;
-          const tier = priceIdToTier[priceId] || "FREE";
-
-          await prisma.user.updateMany({
-            where: { stripeId: subscription.customer },
-            data: { tier },
-          });
-
-          await prisma.subscription.updateMany({
-            where: { stripeSubId: subscription.id },
-            data: {
-              status: subscription.status.toUpperCase(),
-              currentPeriodEnd: new Date(
-                subscription.current_period_end * 1000
-              ),
-            },
-          });
-          break;
-        }
-
-        case "customer.subscription.deleted": {
-          const customer = event.data.object.customer;
-          const subId = event.data.object.id;
-
-          await prisma.user.updateMany({
-            where: { stripeId: customer },
-            data: { tier: "FREE" },
-          });
-
-          await prisma.subscription.updateMany({
-            where: { stripeSubId: subId },
-            data: { status: "CANCELED" },
-          });
-          break;
-        }
-
-        default:
-          console.log(`Unhandled Stripe event type: ${event.type}`);
+      if (!order_id || !email) {
+        return reply.status(400).send({ error: "Missing required fields" });
       }
-    } catch (err) {
-      console.error("Database update failed", err);
-      return reply.status(500).send({ error: "Database update failed" });
-    }
 
-    reply.send({ received: true });
+      // Verify SenangPay signature (HMAC SHA256 of request body)
+      const expectedSignature = request.headers["x-senangpay-signature"];
+      const computedSignature = crypto
+        .createHmac("sha256", process.env.SENANGPAY_SECRET_KEY)
+        .update(JSON.stringify(request.body))
+        .digest("hex");
+
+      if (computedSignature !== expectedSignature) {
+        return reply.status(400).send({ error: "Invalid signature" });
+      }
+
+      // Idempotency: check if payment already recorded
+      const existingPayment = await prisma.payment.findUnique({
+        where: { gatewayPaymentId: order_id },
+      });
+
+      if (existingPayment) {
+        return reply.send({ received: true });
+      }
+
+      // Fetch the user
+      const user = await prisma.user.findUnique({ where: { email } });
+      if (!user) {
+        return reply.status(404).send({ error: "User not found" });
+      }
+
+      // Record the payment
+      await prisma.payment.create({
+        data: {
+          userId: user.id,
+          gatewayPaymentId: order_id,
+          amount: parseFloat(amount),
+          currency: "MYR",
+          status,
+          plan,
+        },
+      });
+
+      // Upgrade user if payment succeeded
+      if (status === "success") {
+        const proExpiry = new Date();
+        proExpiry.setFullYear(proExpiry.getFullYear() + 1); // 1 year PRO
+
+        // Update user tier and PRO expiry
+        await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            tier: "PRO",
+            proExpiry,
+          },
+        });
+
+        // Create or update subscription record
+        await prisma.subscription.upsert({
+          where: {
+            userId_plan: { userId: user.id, plan: plan || "PRO_YEARLY" },
+          },
+          update: {
+            status: "ACTIVE",
+            currentPeriodEnd: proExpiry,
+          },
+          create: {
+            userId: user.id,
+            plan: plan || "PRO_YEARLY",
+            status: "ACTIVE",
+            currentPeriodEnd: proExpiry,
+          },
+        });
+
+        console.log(`User ${user.email} upgraded to PRO until ${proExpiry}`);
+      } else {
+        console.log(`Payment not successful for ${user.email}: ${status}`);
+      }
+
+      reply.send({ received: true });
+    } catch (err) {
+      console.error("Failed to process SenangPay webhook:", err);
+      reply.status(500).send({ error: "Internal server error" });
+    }
   });
-};
+}

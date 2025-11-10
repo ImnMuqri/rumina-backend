@@ -8,10 +8,12 @@ export default async function financialDiaryRoutes(app) {
         where: { userId: req.user.id },
         orderBy: { createdAt: "desc" },
       });
-      return entries;
+      return reply.code(200).send({ success: true, entries });
     } catch (err) {
       app.log.error(err);
-      return reply.code(500).send({ error: "Failed to fetch diary entries" });
+      return reply
+        .code(500)
+        .send({ success: false, error: "Failed to fetch diary entries" });
     }
   });
 
@@ -35,6 +37,12 @@ export default async function financialDiaryRoutes(app) {
       try {
         const { mood, content } = req.body;
 
+        if (!content || content.trim().length < 3) {
+          return reply
+            .code(400)
+            .send({ success: false, error: "Content is too short" });
+        }
+
         // Generate Rumina's AI insight
         const aiInsight = await generateDiaryResponse(content);
 
@@ -47,10 +55,12 @@ export default async function financialDiaryRoutes(app) {
           },
         });
 
-        return reply.code(201).send(entry);
+        return reply.code(201).send({ success: true, entry });
       } catch (err) {
         app.log.error(err);
-        return reply.code(500).send({ error: "Failed to create diary entry" });
+        return reply
+          .code(500)
+          .send({ success: false, error: "Failed to create diary entry" });
       }
     }
   );
@@ -64,17 +74,18 @@ export default async function financialDiaryRoutes(app) {
       });
 
       if (!entry || entry.userId !== req.user.id) {
-        return reply.code(403).send({ error: "Not authorized or not found" });
+        return reply
+          .code(403)
+          .send({ success: false, error: "Not authorized or not found" });
       }
 
-      await app.prisma.financialDiary.delete({
-        where: { id: Number(id) },
-      });
-
-      return { success: true };
+      await app.prisma.financialDiary.delete({ where: { id: Number(id) } });
+      return reply.code(200).send({ success: true });
     } catch (err) {
       app.log.error(err);
-      return reply.code(500).send({ error: "Failed to delete diary entry" });
+      return reply
+        .code(500)
+        .send({ success: false, error: "Failed to delete diary entry" });
     }
   });
 }

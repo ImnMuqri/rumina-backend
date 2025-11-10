@@ -2,6 +2,16 @@ import { hashPassword, comparePassword } from "../utils/hash.js";
 import { generateToken } from "../utils/jwt.js";
 
 export default async function authRoutes(app) {
+  // Apply rate limiting for sensitive endpoints
+  app.register(import("fastify-rate-limit"), {
+    max: 5, // Max 5 requests
+    timeWindow: "1 minute", // per minute
+    keyGenerator: (req) => req.ip, // Limit per IP
+    errorResponseBuilder: () => ({
+      error: "Too many requests, try again later",
+    }),
+  });
+
   // Register new user
   app.post("/register", async (req, reply) => {
     try {
@@ -11,6 +21,12 @@ export default async function authRoutes(app) {
         return reply
           .code(400)
           .send({ error: "Email and password are required" });
+      }
+
+      if (password.length < 8) {
+        return reply
+          .code(400)
+          .send({ error: "Password must be at least 8 characters" });
       }
 
       const existingUser = await app.prisma.user.findUnique({
@@ -25,7 +41,7 @@ export default async function authRoutes(app) {
       const newUser = await app.prisma.user.create({
         data: {
           email,
-          name: name || null,
+          name: name || undefined,
           passwordHash: hashedPassword,
         },
       });
@@ -44,7 +60,7 @@ export default async function authRoutes(app) {
         },
       });
     } catch (error) {
-      req.log.error(error);
+      app.log.error(error);
       return reply.code(500).send({ error: "Registration failed" });
     }
   });
@@ -53,6 +69,12 @@ export default async function authRoutes(app) {
   app.post("/login", async (req, reply) => {
     try {
       const { email, password } = req.body;
+
+      if (!email || !password) {
+        return reply
+          .code(400)
+          .send({ error: "Email and password are required" });
+      }
 
       const user = await app.prisma.user.findUnique({ where: { email } });
       if (!user) {
@@ -78,7 +100,7 @@ export default async function authRoutes(app) {
         },
       });
     } catch (error) {
-      req.log.error(error);
+      app.log.error(error);
       return reply.code(500).send({ error: "Login failed" });
     }
   });
@@ -97,7 +119,7 @@ export default async function authRoutes(app) {
 
       return reply.send({ success: true, user });
     } catch (error) {
-      req.log.error(error);
+      app.log.error(error);
       return reply.code(500).send({ error: "Failed to fetch user profile" });
     }
   });

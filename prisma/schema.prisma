@@ -17,7 +17,7 @@ enum UserTier {
 enum SubscriptionStatus {
   ACTIVE
   CANCELED
-  PAST_DUE
+  EXPIRED
 }
 
 enum TransactionType {
@@ -36,6 +36,7 @@ enum FinancialDiaryMood {
   REFLECTIVE
   ACCOMPLISHED
   GRATEFUL
+  NEUTRAL
 }
 
 // User model
@@ -43,9 +44,9 @@ model User {
   id             Int              @id @default(autoincrement())
   email          String           @unique
   name           String?
-  stripeId       String?          // Stripe customer ID
   passwordHash   String
   tier           UserTier         @default(FREE)
+  proExpiry      DateTime?        // optional for PRO yearly
   createdAt      DateTime         @default(now())
 
   // Relationships
@@ -53,36 +54,39 @@ model User {
   goals          Goal[]
   financialDiary FinancialDiary[]
   aiInsights     AiInsight[]
+  subscriptions  Subscription[]
+  payments       Payment[]
 
-  @@index([stripeId])
+  @@index([email])
 }
 
-// Subscription model
+// Subscription model (for yearly PRO)
 model Subscription {
   id              Int                @id @default(autoincrement())
   userId          Int
-  stripeSubId     String
+  plan            String             // e.g., "PRO_YEARLY"
   status          SubscriptionStatus
-  priceId         String             // Stripe price ID
+  startDate       DateTime           @default(now())
   currentPeriodEnd DateTime
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
 
   user            User               @relation(fields: [userId], references: [id])
 
-  @@unique([userId, stripeSubId])
+  @@unique([userId, plan])
   @@index([userId])
 }
 
-// Payment model
+// Payment model (works with any gateway)
 model Payment {
   id              Int      @id @default(autoincrement())
   userId          Int
-  stripePaymentId String
-  amount          Int
+  gatewayPaymentId String   // e.g., SenangPay payment ID
+  amount          Float
   currency        String   @default("MYR")
-  status          String
-  paymentMethod   String?  // optional: card, wallet, etc.
+  status          String   // e.g., "success", "failed", "pending"
+  paymentMethod   String?  // card, wallet, etc.
+  plan            String?  // optional, link to subscription/plan
   createdAt       DateTime @default(now())
 
   user            User     @relation(fields: [userId], references: [id])
@@ -140,11 +144,11 @@ model AiInsight {
   user                 User      @relation(fields: [userId], references: [id])
   userId               Int       @index
   date                 DateTime  @default(now())
-  wellnessScore        Int       // 0–100
-  savingsRate          Int
-  debtManagement       Int
-  emergencyFund        Int
-  expenseControl       Int
+  wellnessScore        Int?      // nullable, 0–100
+  savingsRate          Int?
+  debtManagement       String?   // text-based insight
+  emergencyFund        String?
+  expenseControl       String?
   summary              String?   // optional AI summary
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt

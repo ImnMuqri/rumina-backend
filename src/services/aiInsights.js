@@ -136,13 +136,13 @@ Only return the JSON object, no extra explanations or text.
 `;
 
   try {
-    const res = await client.responses.create({
+    const res = await client.chat.completions.create({
       model: "llama-3.3-70b-versatile",
-      input: prompt,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.6,
     });
 
-    // Parse and return AI output safely
-    const rawOutput = res.output?.[0]?.content?.[0]?.text || "{}";
+    const rawOutput = res.choices?.[0]?.message?.content?.trim() || "{}";
     return JSON.parse(rawOutput);
   } catch (error) {
     console.error("AI goal insight generation failed:", error);
